@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Fitbit Charge 6 Live HR</title>
+  <style>
+    :root {
+      --bg-color: #000000;
+      --card-bg: #111111;
+      --text-main: #ffffff;
+      --text-muted: #888888;
+      --accent: #ff2d55;
+      --accent-hover: #ff4769;
+      --connected: #30d158;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 100dvh;
+      padding: 24px 20px;
+      text-align: center;
+    }
+
+    header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card-bg);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--text-muted);
+    }
+
+    .dot.active {
+      background-color: var(--connected);
+      box-shadow: 0 0 8px var(--connected);
+    }
+
+    .bpm-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin: auto 0;
+    }
+
+    .bpm-value {
+      font-size: 7.5rem;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -3px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bpm-label {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 2px;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .heart-icon {
+      display: inline-block;
+      transition: transform 0.1s ease;
+    }
+
+    .heart-beat {
+      transform: scale(1.3);
+    }
+
+    .chart-wrapper {
+      width: 100%;
+      max-width: 500px;
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100px;
+      display: block;
+    }
+
+    button {
+      width: 100%;
+      max-width: 500px;
+      padding: 18px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+      background-color: var(--accent);
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    button:active {
+      background-color: var(--accent-hover);
+    }
+
+    button.disconnect {
+      background-color: #2c2c2e;
+      color: #ff453a;
+    }
+
+    .error-msg {
+      color: #ff453a;
+      font-size: 0.85rem;
+      margin-top: 10px;
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="status-badge">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div class="status-badge" id="wakeBadge" style="display: none;">
+      Screen Awake
+    </div>
+  </header>
+
+  <main class="bpm-container">
+    <div class="bpm-value" id="bpmDisplay">--</div>
+    <div class="bpm-label">
+      <span class="heart-icon" id="heartIcon">♥</span> BPM
+    </div>
+    <div class="error-msg" id="errorMsg"></div>
+  </main>
+
+  <div class="chart-wrapper">
+    <div class="chart-header">
+      <span>Last 60 Seconds</span>
+      <span id="minMaxDisplay">Min: -- | Max: --</span>
+    </div>
+    <canvas id="hrChart"></canvas>
+  </div>
+
+  <button id="connectBtn">Connect Fitbit Charge 6</button>
+
+  <script>
+    const HR_SERVICE_UUID = 0x180D;
+    const HR_MEASUREMENT_UUID = 0x2A37;
+    const MAX_DATA_POINTS = 60;
+
+    let bluetoothDevice = null;
+    let hrCharacteristic = null;
+    let wakeLock = null;
+    let hrHistory = [];
+
+    const connectBtn = document.getElementById('connectBtn');
+    const bpmDisplay = document.getElementById('bpmDisplay');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const errorMsg = document.getElementById('errorMsg');
+    const heartIcon = document.getElementById('heartIcon');
+    const wakeBadge = document.getElementById('wakeBadge');
+    const minMaxDisplay = document.getElementById('minMaxDisplay');
+    const canvas = document.getElementById('hrChart');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      drawChart();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeBadge.style.display = 'inline-flex';
+          wakeLock.addEventListener('release', () => {
+            wakeBadge.style.display = 'none';
+          });
+        } catch (err) {
+          console.warn('Wake Lock failed:', err);
+        }
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock !== null) {
+        wakeLock.release();
+        wakeLock = null;
+        wakeBadge.style.display = 'none';
+      }
+    }
+
+    function parseHeartRate(value) {
+      const flags = value.getUint8(0);
+      const is16Bit = flags & 0x01;
+      if (is16Bit) {
+        return value.getUint16(1, true);
+      } else {
+        return value.getUint8(1);
+      }
+    }
+
+    function handleHeartRateChanged(event) {
+      const value = event.target.value;
+      const bpm = parseHeartRate(value);
+
+      bpmDisplay.textContent = bpm;
+      
+      // Pulse animation
+      heartIcon.classList.add('heart-beat');
+      setTimeout(() => heartIcon.classList.remove('heart-beat'), 150);
+
+      // Update rolling history
+      hrHistory.push(bpm);
+      if (hrHistory.length > MAX_DATA_POINTS) {
+        hrHistory.shift();
+      }
+
+      const min = Math.min(...hrHistory);
+      const max = Math.max(...hrHistory);
+      minMaxDisplay.textContent = `Min: ${min} | Max: ${max}`;
+
+      drawChart();
+    }
+
+    function drawChart() {
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      ctx.clearRect(0, 0, width, height);
+
+      if (hrHistory.length < 2) return;
+
+      const minVal = Math.min(...hrHistory) - 5;
+      const maxVal = Math.max(...hrHistory) + 5;
+      const range = Math.max(maxVal - minVal, 10);
+
+      ctx.beginPath();
+      ctx.strokeStyle = '#ff2d55';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      hrHistory.forEach((bpm, index) => {
+        const x = (index / (MAX_DATA_POINTS - 1)) * width;
+        const normalizedY = (bpm - minVal) / range;
+        const y = height - (normalizedY * (height - 16) + 8);
+
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+    }
+
+    function onDisconnected() {
+      statusDot.classList.remove('active');
+      statusText.textContent = 'Disconnected';
+      connectBtn.textContent = 'Connect Fitbit Charge 6';
+      connectBtn.classList.remove('disconnect');
+      bpmDisplay.textContent = '--';
+      releaseWakeLock();
+    }
+
+    async function toggleConnection() {
+      errorMsg.textContent = '';
+
+      if (!navigator.bluetooth) {
+        errorMsg.textContent = 'Web Bluetooth not supported. Open this page in Bluefy or WebBLE on iOS.';
+        return;
+      }
+
+      if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+        bluetoothDevice.gatt.disconnect();
+        return;
+      }
+
+      try {
+        statusText.textContent = 'Scanning...';
+        bluetoothDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [HR_SERVICE_UUID] }]
+        });
+
+        bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+        statusText.textContent = 'Connecting...';
+        const server = await bluetoothDevice.gatt.connect();
+        const service = await server.getPrimaryService(HR_SERVICE_UUID);
+        hrCharacteristic = await service.getCharacteristic(HR_MEASUREMENT_UUID);
+
+        await hrCharacteristic.startNotifications();
+        hrCharacteristic.addEventListener('characteristicvaluechanged', handleHeartRateChanged);
+
+        statusDot.classList.add('active');
+        statusText.textContent = bluetoothDevice.name || 'Connected';
+        connectBtn.textContent = 'Disconnect';
+        connectBtn.classList.add('disconnect');
+        hrHistory = [];
+
+        await requestWakeLock();
+      } catch (error) {
+        console.error(error);
+        statusText.textContent = 'Disconnected';
+        if (error.name !== 'NotFoundError') {
+          errorMsg.textContent = error.message || 'Connection failed.';
+        }
+      }
+    }
+
+    connectBtn.addEventListener('click', toggleConnection);
+  </script>
+</body>
+</html>
