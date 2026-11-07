@@ -255,6 +255,7 @@
 
   <script>
     const HR_SERVICE_UUID = 0x180D;
+    const HR_SERVICE_FULL_UUID = '0000180d-0000-1000-8000-00805f9b34fb';
     const HR_MEASUREMENT_UUID = 0x2A37;
     const MAX_DATA_POINTS = 60;
 
@@ -413,7 +414,7 @@
       try {
         statusText.textContent = 'Scanning...';
         const options = showAllDevices.checked
-          ? { acceptAllDevices: true, optionalServices: [HR_SERVICE_UUID] }
+          ? { acceptAllDevices: true, optionalServices: [HR_SERVICE_FULL_UUID] }
           : { filters: [{ services: [HR_SERVICE_UUID] }] };
         const deviceRequest = navigator.bluetooth.requestDevice(options);
         connectBtn.disabled = true;
