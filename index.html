@@ -397,15 +397,16 @@
         return;
       }
 
-      connectBtn.disabled = true;
-      showAllDevices.disabled = true;
       let deviceSelected = false;
       try {
         statusText.textContent = 'Scanning...';
         const options = showAllDevices.checked
           ? { acceptAllDevices: true, optionalServices: [HR_SERVICE_UUID] }
           : { filters: [{ services: [HR_SERVICE_UUID] }] };
-        bluetoothDevice = await navigator.bluetooth.requestDevice(options);
+        const deviceRequest = navigator.bluetooth.requestDevice(options);
+        connectBtn.disabled = true;
+        showAllDevices.disabled = true;
+        bluetoothDevice = await deviceRequest;
         deviceSelected = true;
 
         bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
@@ -436,9 +437,12 @@
         }
         hrCharacteristic = null;
         statusText.textContent = 'Disconnected';
-        if (deviceSelected && error.name === 'NotFoundError') {
+        if (!deviceSelected) {
+          const detail = error.message ? `${error.name}: ${error.message}` : error.name || 'Unknown error';
+          errorMsg.textContent = `Device selection failed or was cancelled (${detail}). Check Bluetooth and browser permissions, then try again.`;
+        } else if (error.name === 'NotFoundError') {
           errorMsg.textContent = 'This device does not expose the required heart-rate service or measurement characteristic.';
-        } else if (error.name !== 'NotFoundError') {
+        } else {
           errorMsg.textContent = error.message || 'Connection failed.';
         }
       } finally {
