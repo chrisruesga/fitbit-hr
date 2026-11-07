@@ -146,6 +146,68 @@
       color: #ff453a;
     }
 
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    .discovery-option {
+      width: 100%;
+      max-width: 500px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .discovery-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .discovery-toggle input {
+      appearance: none;
+      flex: 0 0 44px;
+      width: 44px;
+      height: 26px;
+      border-radius: 13px;
+      background: #555;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .discovery-toggle input::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+
+    .discovery-toggle input:checked {
+      background: var(--accent);
+    }
+
+    .discovery-toggle input:checked::after {
+      transform: translateX(18px);
+    }
+
+    .discovery-toggle input:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: 3px;
+    }
+
+    .discovery-help {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      margin-top: 6px;
+    }
+
     .error-msg {
       color: #ff453a;
       font-size: 0.85rem;
@@ -182,6 +244,13 @@
     <canvas id="hrChart"></canvas>
   </div>
 
+  <div class="discovery-option">
+    <label class="discovery-toggle">
+      <span>Show all Bluetooth devices</span>
+      <input type="checkbox" id="showAllDevices" role="switch" aria-describedby="discoveryHelp" />
+    </label>
+    <p class="discovery-help" id="discoveryHelp">Shows available Bluetooth Low Energy devices in the browser picker. Heart-rate readings require a compatible device.</p>
+  </div>
   <button id="connectBtn">Connect Fitbit Charge 6</button>
 
   <script>
@@ -195,6 +264,7 @@
     let hrHistory = [];
 
     const connectBtn = document.getElementById('connectBtn');
+    const showAllDevices = document.getElementById('showAllDevices');
     const bpmDisplay = document.getElementById('bpmDisplay');
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
@@ -308,7 +378,7 @@
     function onDisconnected() {
       statusDot.classList.remove('active');
       statusText.textContent = 'Disconnected';
-      connectBtn.textContent = 'Connect Fitbit Charge 6';
+      connectBtn.textContent = showAllDevices.checked ? 'Connect Device' : 'Connect Fitbit Charge 6';
       connectBtn.classList.remove('disconnect');
       bpmDisplay.textContent = '--';
       releaseWakeLock();
@@ -327,11 +397,16 @@
         return;
       }
 
+      connectBtn.disabled = true;
+      showAllDevices.disabled = true;
+      let deviceSelected = false;
       try {
         statusText.textContent = 'Scanning...';
-        bluetoothDevice = await navigator.bluetooth.requestDevice({
-          filters: [{ services: [HR_SERVICE_UUID] }]
-        });
+        const options = showAllDevices.checked
+          ? { acceptAllDevices: true, optionalServices: [HR_SERVICE_UUID] }
+          : { filters: [{ services: [HR_SERVICE_UUID] }] };
+        bluetoothDevice = await navigator.bluetooth.requestDevice(options);
+        deviceSelected = true;
 
         bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
@@ -352,13 +427,31 @@
         await requestWakeLock();
       } catch (error) {
         console.error(error);
+        if (bluetoothDevice) {
+          bluetoothDevice.removeEventListener('gattserverdisconnected', onDisconnected);
+          if (bluetoothDevice.gatt.connected) {
+            bluetoothDevice.gatt.disconnect();
+          }
+          bluetoothDevice = null;
+        }
+        hrCharacteristic = null;
         statusText.textContent = 'Disconnected';
-        if (error.name !== 'NotFoundError') {
+        if (deviceSelected && error.name === 'NotFoundError') {
+          errorMsg.textContent = 'This device does not expose the required heart-rate service or measurement characteristic.';
+        } else if (error.name !== 'NotFoundError') {
           errorMsg.textContent = error.message || 'Connection failed.';
         }
+      } finally {
+        connectBtn.disabled = false;
+        showAllDevices.disabled = false;
       }
     }
 
+    showAllDevices.addEventListener('change', () => {
+      if (!connectBtn.classList.contains('disconnect')) {
+        connectBtn.textContent = showAllDevices.checked ? 'Connect Device' : 'Connect Fitbit Charge 6';
+      }
+    });
     connectBtn.addEventListener('click', toggleConnection);
   </script>
 </body>
