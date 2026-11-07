@@ -384,6 +384,18 @@
       releaseWakeLock();
     }
 
+    function describeError(error) {
+      if (error == null) return 'No error details provided by the browser';
+      if (typeof error !== 'object') return String(error);
+      if (error.name || error.message) {
+        return [error.name, error.message].filter(Boolean).join(': ');
+      }
+      const details = Object.entries(error)
+        .filter(([, value]) => value == null || ['string', 'number', 'boolean'].includes(typeof value))
+        .map(([key, value]) => `${key}: ${value}`);
+      return details.join(', ') || 'No error details provided by the browser';
+    }
+
     async function toggleConnection() {
       errorMsg.textContent = '';
 
@@ -438,12 +450,11 @@
         hrCharacteristic = null;
         statusText.textContent = 'Disconnected';
         if (!deviceSelected) {
-          const detail = error.message ? `${error.name}: ${error.message}` : error.name || 'Unknown error';
-          errorMsg.textContent = `Device selection failed or was cancelled (${detail}). Check Bluetooth and browser permissions, then try again.`;
-        } else if (error.name === 'NotFoundError') {
+          errorMsg.textContent = `Device selection failed or was cancelled (${describeError(error)}). Check Bluetooth and browser permissions, then try again.`;
+        } else if (error && error.name === 'NotFoundError') {
           errorMsg.textContent = 'This device does not expose the required heart-rate service or measurement characteristic.';
         } else {
-          errorMsg.textContent = error.message || 'Connection failed.';
+          errorMsg.textContent = `Connection failed (${describeError(error)}).`;
         }
       } finally {
         connectBtn.disabled = false;
